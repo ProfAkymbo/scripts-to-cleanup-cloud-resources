@@ -1,0 +1,71 @@
+import boto3
+from botocore.exceptions import ClientError
+from datetime import datetime, timedelta, timezone
+import logging
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+def manage_access_keys(iam_client, username):
+    try:
+        # List access keys for the user
+        response = iam_client.list_access_keys(UserName=username)
+        access_keys = response['AccessKeyMetadata']
+
+        if not access_keys:
+            logger.info(f"No access keys found for user {username}. Creating a new one.")
+            create_new_key(iam_client, username)
+            return
+
+        # Current time for comparison
+        now = datetime.now(timezone.utc)
+        ninety_days_ago = now - timedelta(days=90)
+
+        for key in access_keys:
+            key_id = key['AccessKeyId']
+            create_date = key['CreateDate']
+
+            # Check if key is older than 90 days
+            if create_date < ninety_days_ago:
+                logger.info(f"Deleting access key {key_id} for user {username} (created on {create_date})")
+                try:
+                    iam_client.delete_access_key(UserName=username, AccessKeyId=key_id)
+                    logger.info(f"Successfully deleted access key {key_id}")
+
+                    # Create a new key after deletion
+                    create_new_key(iam_client, username)
+                except ClientError as e:
+                    logger.error(f"Failed to delete access key {key_id}: {e}")
+            else:
+                logger.info(f"Access key {key_id} is less than 90 days old (created on {create_date})")
+
+    except ClientError as e:
+        logger.error(f"Error managing access keys for {username}: {e}")
+
+def create_new_key(iam_client, username):
+    try:
+        # Create a new access key
+        new_key_response = iam_client.create_access_key(UserName=username)
+        new_key = new_key_response['AccessKey']
+        logger.info(f"Created new access key {new_key['AccessKeyId']} for user {username}")
+
+        # Output the new key details (in practice, store securely)
+        print(f"New Access Key ID: {new_key['AccessKeyId']}")
+        print(f"New Secret Access Key: {new_key['SecretAccessKey']}")
+
+    except ClientError as e:
+        logger.error(f"Failed to create new access key for {username}: {e}")
+
+def main():
+    # Initialize IAM client
+    iam_client = boto3.client('iam')
+
+    # Specify the IAM username
+    username = 'akeem-s3-user'  # Replace with the target IAM username
+
+    logger.info(f"Starting access key management for user {username}")
+    manage_access_keys(iam_client, username)
+
+if __name__ == "__main__":
+    main()
